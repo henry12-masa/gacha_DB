@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8398161859137802"
+     crossorigin="anonymous"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>東京 ガチャガチャ設置場所DB</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101014;color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{padding:24px;background:linear-gradient(135deg,#581c87,#7c3aed,#ec4899);text-align:center}
+header h1{margin:0;font-size:28px}
+header p{margin:8px 0 0;color:#fce7f3}
+.wrap{max-width:1200px;margin:auto;padding:16px}
+.grid{display:grid;grid-template-columns:390px 1fr;gap:16px}
+.panel{background:#18181b;border-radius:18px;padding:16px;border:1px solid rgba(255,255,255,.12);box-shadow:0 18px 50px rgba(0,0,0,.22)}
+label{display:block;margin:10px 0 6px;font-weight:800}
+input,select,textarea{width:100%;padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:#0f0f12;color:#fff}
+textarea{min-height:210px;font-family:Consolas,monospace;white-space:pre;overflow:auto}
+button{border:0;border-radius:12px;padding:11px 14px;background:#db2777;color:#fff;font-weight:800;cursor:pointer}
+button.secondary{background:#52525b}
+button.danger{background:#dc2626}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+#map{height:620px;border-radius:18px;background:#374151}
+.small{font-size:13px;color:#d4d4d8;line-height:1.6}
+.results{display:grid;gap:10px;max-height:560px;overflow:auto;margin-top:12px}
+.shop{background:#0f0f12;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px}
+.shop h3{margin:0 0 6px;color:#f9a8d4;font-size:16px}
+.shop p{margin:4px 0;color:#d4d4d8;font-size:14px}
+.tag{display:inline-block;background:#3f3f46;border-radius:999px;padding:4px 8px;margin:2px;font-size:12px}
+.score{display:inline-block;background:#831843;color:#fce7f3;border-radius:999px;padding:4px 8px;margin:2px;font-size:12px;font-weight:800}
+#dataBox{display:none}
+.err{background:#3f1d1d;color:#fecaca;border:1px solid #7f1d1d;padding:10px;border-radius:12px;white-space:pre-wrap}
+.ok{background:#063b2c;color:#bbf7d0;border:1px solid #16a34a;padding:10px;border-radius:12px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}#map{height:430px}}
+</style>
+</head>
+<body>
+<header>
+<h1>東京 ガチャガチャ設置場所DB</h1>
+<p>アニメ・ゲーム・キャラクター系ガチャを地図で探せるデータベース</p>
+</header>
+
+<main class="wrap">
+<div class="grid">
+<section class="panel">
+<label>エリア</label>
+<select id="areaMode"></select>
+
+<label>キーワード</label>
+<input id="keyword" placeholder="店名・住所・タグで検索 例：秋葉原 ポケモン アニメ 大型店">
+
+<div class="btns">
+<button onclick="applySearch()">検索</button>
+<button class="secondary" onclick="showData()">CSV貼り付け</button>
+<button class="secondary" onclick="showResults()">検索結果</button>
+<button class="danger" onclick="resetStores()">初期化</button>
+</div>
+
+<p id="status" class="small"></p>
+<div id="message"></div>
+
+<div id="resultsBox" class="results"></div>
+
+<div id="dataBox">
+<p class="small">
+対応CSV：<br>
+id,name,area,address,lat,lng,tags<br>
+または<br>
+id,name,type,area,cityArea,address,lat,lng,rating,tags,memo<br><br>
+tags例：アニメ|ゲーム|ポケモン|大型店|駅近|キャラクター|最新ガチャ
+</p>
+<label>CSV貼り付け</label>
+<textarea id="csvInput"></textarea>
+<div class="btns">
+<button onclick="applyCsv()">CSVを反映</button>
+<button class="secondary" onclick="exportCsv()">現在データをCSV欄へ</button>
+</div>
+
+<label>JSON確認</label>
+<textarea id="jsonBox"></textarea>
+</div>
+</section>
+
+<section class="panel">
+<div id="map"></div>
+<p class="small">※来店前に営業時間・設置台数・入荷状況・閉店情報を公式サイトやGoogleマップで確認してください。</p>
+</section>
+</div>
+</main>
+
+<script>
+const STORAGE_KEY = "tokyo_gachagacha_location_db_v1";
+
+// GoogleスプレッドシートCSVを使う場合は、下に公開CSV URLを入れてください。
+const CSV_URL = "";
+
+const DEFAULT_STORES = [
+  {id:"gacha_001",name:"ガシャポンのデパート 池袋総本店",type:"ガチャ専門店",area:"tokyo",cityArea:"池袋",address:"東京都豊島区東池袋1-5-7",lat:35.7295,lng:139.7109,rating:5,tags:["池袋","大型店","アニメ","ゲーム","キャラクター","最新ガチャ","駅近"],memo:"池袋の大型ガチャスポット。種類が多く探しやすい。"},
+  {id:"gacha_002",name:"ガシャポンのデパート 秋葉原店",type:"ガチャ専門店",area:"tokyo",cityArea:"秋葉原",address:"東京都千代田区外神田1-15-9",lat:35.6984,lng:139.7730,rating:5,tags:["秋葉原","大型店","アニメ","ゲーム","フィギュア","駅近"],memo:"アニメ・ゲーム系を探しやすい秋葉原エリアの候補。"},
+  {id:"gacha_003",name:"#C-pla 原宿竹下通り店",type:"カプセルトイ専門店",area:"tokyo",cityArea:"原宿",address:"東京都渋谷区神宮前1-16-2",lat:35.6717,lng:139.7043,rating:4,tags:["原宿","キャラクター","流行","かわいい系","観光"],memo:"若者向け・トレンド系ガチャを探しやすい。"},
+  {id:"gacha_004",name:"ヨドバシAkiba ガチャコーナー",type:"家電量販店",area:"tokyo",cityArea:"秋葉原",address:"東京都千代田区神田花岡町1-1",lat:35.6987,lng:139.7745,rating:4,tags:["秋葉原","駅近","ゲーム","アニメ","家電量販店"],memo:"駅前で寄りやすいガチャコーナー。"},
+  {id:"gacha_005",name:"ビックカメラ 新宿東口店 ガチャコーナー",type:"家電量販店",area:"tokyo",cityArea:"新宿",address:"東京都新宿区新宿3-29-1",lat:35.6914,lng:139.7026,rating:3,tags:["新宿","駅近","アニメ","ミニフィギュア"],memo:"新宿駅近くで探しやすい。"},
+  {id:"gacha_006",name:"ヤマシロヤ",type:"玩具店",area:"tokyo",cityArea:"上野",address:"東京都台東区上野6-14-6",lat:35.7111,lng:139.7761,rating:4,tags:["上野","玩具店","キャラクター","アニメ","駅近"],memo:"おもちゃ系・キャラクター系ガチャの候補。"},
+  {id:"gacha_007",name:"東京駅一番街 キャラクターストリート周辺",type:"商業施設",area:"tokyo",cityArea:"東京駅",address:"東京都千代田区丸の内1-9-1",lat:35.6812,lng:139.7671,rating:4,tags:["東京駅","キャラクター","観光","駅近","商業施設"],memo:"キャラクター系ショップ周辺でガチャを探しやすい。"},
+  {id:"gacha_008",name:"中野ブロードウェイ ガチャコーナー",type:"商業施設",area:"tokyo",cityArea:"中野",address:"東京都中野区中野5-52-15",lat:35.7091,lng:139.6657,rating:4,tags:["中野","アニメ","レトロ","サブカル","フィギュア"],memo:"サブカル系と相性の良いエリア。"},
+  {id:"gacha_009",name:"アニメイト池袋本店 周辺ガチャ",type:"アニメショップ周辺",area:"tokyo",cityArea:"池袋",address:"東京都豊島区東池袋1-20-7",lat:35.7312,lng:139.7164,rating:4,tags:["池袋","アニメ","女性向け","キャラクター","駅近"],memo:"アニメ系ガチャ探しの候補。"},
+  {id:"gacha_010",name:"ソラマチ カプセルトイコーナー",type:"商業施設",area:"tokyo",cityArea:"押上",address:"東京都墨田区押上1-1-2",lat:35.7101,lng:139.8107,rating:4,tags:["押上","観光","キャラクター","ファミリー","商業施設"],memo:"観光ついでに寄りやすい。"}
+];
+
+let stores = [];
+let filteredStores = [];
+let map;
+let markers = [];
+
+async function init(){
+  stores = await loadStoresFromCsvUrl();
+  map = L.map("map").setView([35.681236,139.767125], 11);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom:19,
+    attribution:"&copy; OpenStreetMap contributors"
+  }).addTo(map);
+
+  document.getElementById("areaMode").addEventListener("change", applySearch);
+  document.getElementById("keyword").addEventListener("input", applySearch);
+  exportCsv();
+  buildAreas();
+  applySearch();
+}
+
+function loadStores(){
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if(saved) return JSON.parse(saved);
+  } catch(e) {}
+  return DEFAULT_STORES;
+}
+
+async function loadStoresFromCsvUrl(){
+  if(!CSV_URL) return loadStores();
+  try {
+    const res = await fetch(CSV_URL);
+    const text = await res.text();
+    const data = parseCsvText(text, "スプレッドシート読込");
+    if(data.length) return data;
+  } catch(e) {
+    console.error("CSV読み込み失敗", e);
+  }
+  return loadStores();
+}
+
+function saveStores(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(stores));
+}
+
+function cleanText(s){
+  return String(s ?? "")
+    .replace(/^\uFEFF/, "")
+    .replace(/\uFEFF/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[，]/g, ",")
+    .trim();
+}
+
+function parseCsvLine(line){
+  const out = [];
+  let cur = "";
+  let q = false;
+  for(let i=0;i<line.length;i++){
+    const ch = line[i];
+    if(ch === '"' && line[i+1] === '"'){cur += '"'; i++;}
+    else if(ch === '"') q = !q;
+    else if(ch === "," && !q){out.push(cleanText(cur)); cur = "";}
+    else cur += ch;
+  }
+  out.push(cleanText(cur));
+  return out;
+}
+
+function parseCsvText(raw, memoDefault){
+  const text = cleanText(raw);
+  const lines = text.split(/\r?\n/).map(x => cleanText(x)).filter(Boolean);
+  if(!lines.length) return [];
+
+  const headerRaw = parseCsvLine(lines.shift()).map(h => cleanText(h));
+  const header = headerRaw.map(h => h.toLowerCase());
+  const data = [];
+
+  lines.forEach((line) => {
+    const vals = parseCsvLine(line);
+    const row = {};
+    header.forEach((h,i) => row[h] = vals[i] ?? "");
+
+    let obj = null;
+
+    if(header.includes("id") && header.includes("name")){
+      obj = {
+        id: row.id,
+        name: row.name,
+        type: row.type || "ガチャ設置場所",
+        area: "tokyo",
+        cityArea: row.cityarea || row.area || "",
+        address: row.address,
+        lat: Number(row.lat),
+        lng: Number(row.lng),
+        rating: Number(row.rating || 4),
+        tags: String(row.tags || "").split("|").map(cleanText).filter(Boolean),
+        memo: row.memo || memoDefault || "CSV追加"
+      };
+    }
+
+    if(!obj || !validStore(obj)){
+      if(vals.length >= 7){
+        obj = {
+          id: vals[0],
+          name: vals[1],
+          type: "ガチャ設置場所",
+          area: "tokyo",
+          cityArea: vals[2],
+          address: vals[3],
+          lat: Number(vals[4]),
+          lng: Number(vals[5]),
+          rating: 4,
+          tags: String(vals.slice(6).join("|")).split("|").map(cleanText).filter(Boolean),
+          memo: memoDefault || "CSV追加"
+        };
+      }
+    }
+
+    if(!obj || !validStore(obj)){
+      if(vals.length >= 8){
+        obj = {
+          id: vals[0],
+          name: vals[1],
+          type: vals[2] || "ガチャ設置場所",
+          area: "tokyo",
+          cityArea: vals[4] || vals[3],
+          address: vals[5],
+          lat: Number(vals[6]),
+          lng: Number(vals[7]),
+          rating: Number(vals[8] || 4),
+          tags: String(vals[9] || "").split("|").map(cleanText).filter(Boolean),
+          memo: vals[10] || memoDefault || "CSV追加"
+        };
+      }
+    }
+
+    if(obj){
+      if(!obj.cityArea || obj.cityArea === "tokyo") {
+        obj.cityArea = inferArea([obj.name,obj.address,obj.tags.join("|"),obj.memo].join(" "));
+      }
+      if(!obj.tags.includes(obj.cityArea)) obj.tags.unshift(obj.cityArea);
+      if(!obj.tags.some(t => t.includes("ガチャ"))) obj.tags.push("ガチャ");
+    }
+
+    if(obj && validStore(obj)) data.push(obj);
+  });
+
+  return data;
+}
+
+function isNum(v){
+  return Number.isFinite(Number(v));
+}
+
+function validStore(s){
+  return s.id && s.name && isNum(s.lat) && isNum(s.lng);
+}
+
+function inferArea(text){
+  const t = String(text || "");
+  const rules = [
+    ["新宿",["新宿","西新宿","歌舞伎町","高田馬場","早稲田"]],
+    ["渋谷",["渋谷","道玄坂","宇田川町","宮益坂"]],
+    ["原宿",["原宿","竹下通り","神宮前"]],
+    ["池袋",["池袋","東池袋","南池袋","西池袋"]],
+    ["秋葉原",["秋葉原","外神田","神田"]],
+    ["上野",["上野","御徒町","湯島","鶯谷"]],
+    ["東京駅",["東京駅","丸の内","八重洲"]],
+    ["押上",["押上","スカイツリー","ソラマチ"]],
+    ["中野",["中野","中野ブロードウェイ"]],
+    ["新橋",["新橋","汐留"]],
+    ["銀座",["銀座","有楽町","築地"]],
+    ["赤坂",["赤坂","溜池山王"]],
+    ["六本木",["六本木","麻布"]],
+    ["恵比寿",["恵比寿","代官山"]],
+    ["吉祥寺",["吉祥寺","井の頭","井之頭"]],
+    ["立川",["立川","西国立"]],
+    ["町田",["町田"]]
+  ];
+  for(const [area, words] of rules){
+    if(words.some(w => t.includes(w))) return area;
+  }
+  return "その他";
+}
+
+function applyCsv(){
+  const msg = document.getElementById("message");
+  msg.innerHTML = "";
+  const raw = document.getElementById("csvInput").value;
+  const text = cleanText(raw);
+  if(!text){
+    msg.innerHTML = '<div class="err">CSVが空です。</div>';
+    return;
+  }
+
+  const data = parseCsvText(text, "CSV追加");
+
+  if(!data.length){
+    msg.innerHTML = '<div class="err">読み込める行がありません。CSVのヘッダーとlat/lngを確認してください。</div>';
+    return;
+  }
+
+  stores = data;
+  saveStores();
+  exportCsv();
+  buildAreas();
+  document.getElementById("areaMode").value = "all";
+  applySearch();
+
+  msg.innerHTML = '<div class="ok">' + data.length + '件読み込みました。</div>';
+}
+
+function buildAreas(){
+  const select = document.getElementById("areaMode");
+  const current = select.value || "all";
+  const areas = [...new Set(stores.map(s => s.cityArea || "その他"))].sort((a,b)=>a.localeCompare(b,"ja"));
+  select.innerHTML = '<option value="all">東京全体</option>';
+  areas.forEach(a => {
+    const opt = document.createElement("option");
+    opt.value = a;
+    opt.textContent = a;
+    select.appendChild(opt);
+  });
+  select.value = current === "all" || areas.includes(current) ? current : "all";
+}
+
+function applySearch(){
+  const area = document.getElementById("areaMode").value;
+  const kw = document.getElementById("keyword").value.toLowerCase().trim();
+  filteredStores = stores.filter(s => {
+    const text = [s.id,s.name,s.type,s.cityArea,s.address,(s.tags||[]).join("|"),s.memo].join(" ").toLowerCase();
+    return (area === "all" || s.cityArea === area) && (!kw || text.includes(kw));
+  });
+  renderResults();
+  renderMarkers();
+  showResults();
+  setStatus(filteredStores.length + "件表示 / 全" + stores.length + "件");
+}
+
+function renderResults(){
+  const box = document.getElementById("resultsBox");
+  if(!filteredStores.length){
+    box.innerHTML = '<p class="small">該当なし。エリアを東京全体にするか、キーワードを短くしてください。</p>';
+    return;
+  }
+  box.innerHTML = filteredStores.map((s,i) => `
+    <div class="shop">
+      <h3>${i+1}. ${esc(s.name)}</h3>
+      <p>${esc(s.address)}</p>
+      <p><span class="score">充実度 ${esc(s.rating || 4)}/5</span><span class="tag">${esc(s.cityArea)}</span><span class="tag">${esc(s.type)}</span>${(s.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join("")}</p>
+      <p>${esc(s.memo || "")}</p>
+      <div class="btns">
+        <button class="secondary" onclick="focusStore('${escAttr(s.id)}')">地図で見る</button>
+        <button onclick="openGoogle('${escAttr(s.id)}')">Googleマップ</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function validCoord(s){
+  const lat = Number(s.lat);
+  const lng = Number(s.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 20 && lat <= 46 && lng >= 122 && lng <= 154;
+}
+
+function renderMarkers(){
+  markers.forEach(m => m.remove());
+  markers = [];
+  const list = filteredStores.filter(validCoord);
+  if(!list.length) return;
+  const bounds = [];
+  list.forEach(s => {
+    const marker = L.marker([Number(s.lat),Number(s.lng)]).addTo(map);
+    marker.storeId = s.id;
+    marker.bindPopup("<b>" + esc(s.name) + "</b><br>" + esc(s.address) + "<br>充実度 " + esc(s.rating || 4) + "/5");
+    markers.push(marker);
+    bounds.push([Number(s.lat),Number(s.lng)]);
+  });
+  if(bounds.length === 1) map.setView(bounds[0], 15);
+  else map.fitBounds(bounds, {padding:[30,30], maxZoom:14});
+  setTimeout(()=>map.invalidateSize(),100);
+}
+
+function focusStore(id){
+  const s = stores.find(x => x.id === id);
+  if(!s || !validCoord(s)) return;
+  map.setView([Number(s.lat),Number(s.lng)], 16);
+  const m = markers.find(x => x.storeId === id);
+  if(m) m.openPopup();
+}
+
+function openGoogle(id){
+  const s = stores.find(x => x.id === id);
+  if(!s) return;
+  window.open("https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(s.name + " " + s.address), "_blank");
+}
+
+function exportCsv(){
+  const header = "id,name,area,address,lat,lng,tags";
+  const rows = stores.map(s => [
+    s.id,
+    s.name,
+    s.cityArea,
+    s.address,
+    s.lat,
+    s.lng,
+    (s.tags||[]).join("|")
+  ].map(csvEscape).join(","));
+  const csv = header + "\n" + rows.join("\n");
+  document.getElementById("csvInput").value = csv;
+  document.getElementById("jsonBox").value = JSON.stringify(stores,null,2);
+}
+
+function csvEscape(v){
+  const s = String(v ?? "");
+  if(/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+  return s;
+}
+
+function resetStores(){
+  localStorage.removeItem(STORAGE_KEY);
+  stores = DEFAULT_STORES;
+  exportCsv();
+  buildAreas();
+  applySearch();
+}
+
+function showData(){
+  document.getElementById("dataBox").style.display = "block";
+  document.getElementById("resultsBox").style.display = "none";
+}
+
+function showResults(){
+  document.getElementById("dataBox").style.display = "none";
+  document.getElementById("resultsBox").style.display = "grid";
+}
+
+function setStatus(t){document.getElementById("status").textContent = t;}
+
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));}
+function escAttr(s){return String(s??"").replace(/[\\'"<>]/g,"");}
+
+window.addEventListener("load", init);
+</script>
+
+<div style="max-width:1200px;margin:30px auto 20px;padding:0 16px;">
+  <div style="
+    background:#18181b;
+    border-radius:18px;
+    padding:16px;
+    border:1px solid rgba(255,255,255,.12);
+    text-align:center;
+  ">
+
+    <script async
+      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8398161859137802"
+      crossorigin="anonymous"></script>
+
+    <ins class="adsbygoogle"
+         style="display:block"
+         data-ad-client="ca-pub-8398161859137802"
+         data-ad-slot="5599163841"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+
+    <script>
+      (adsbygoogle = window.adsbygoogle || []).push({});
+    </script>
+
+  </div>
+</div>
+</body>
+</html>
